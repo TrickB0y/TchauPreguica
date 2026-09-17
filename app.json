@@ -3,20 +3,39 @@
     "name": "TchauPreguica",
     "slug": "TchauPreguica",
     "version": "1.0.0",
+<<<<<<< HEAD
     "assetBundlePatterns": [
       "**/*"
     ],
+=======
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+>>>>>>> 0ef8db38715a09e6e8fd5d14ec93206e0182f3f9
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
+<<<<<<< HEAD
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       }
+=======
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+>>>>>>> 0ef8db38715a09e6e8fd5d14ec93206e0182f3f9
     },
     "web": {
       "favicon": "./assets/favicon.png"
     }
   }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 0ef8db38715a09e6e8fd5d14ec93206e0182f3f9

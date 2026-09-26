@@ -22,6 +22,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authenticateAsync } from 'expo-local-authentication';
+import MapView, { Marker } from 'react-native-maps';
 
 // =====================================================
 // TIPOS
@@ -74,6 +76,20 @@ function formatarData(data: string): string {
 function formatarEndereco(foto: Foto): string {
   return foto.endereco?.trim() || 'Endereço não disponível';
 }
+
+async function autenticar() {
+    try {
+      const resultado = await authenticateAsync({
+        disableDeviceFallback: false,
+        promptMessage: 'Autentique para confirmar que é você quem está em movimento',
+      });
+
+      return resultado.success;
+    } catch (error) {
+      console.error('Erro na autenticação:', error);
+      return false;
+    }
+  }
 
 async function obterEndereco(
   latitude: number,
@@ -408,6 +424,7 @@ export default function CaptureScreen({
       // Obtém as coordenadas e o endereço.
       // Se o GPS falhar, a foto ainda será salva.
       try {
+        autenticar();
         const permissao =
           await Location.requestForegroundPermissionsAsync();
 
@@ -679,6 +696,141 @@ export default function CaptureScreen({
         ? 'Minhas localizações'
         : 'Meus registros';
 
+
+// ===================================================
+// REFAZER FOTO DE UM REGISTRO JÁ SALVO
+// ===================================================
+
+async function refazerFotoRegistro(foto: Foto) {
+  if (!usuarioId || !storageKey || carregando) {
+    return;
+  }
+
+  try {
+    const permissao =
+      await ImagePicker.requestCameraPermissionsAsync();
+
+    if (!permissao.granted) {
+      Alert.alert(
+        'Permissão necessária',
+        'Autorize o acesso à câmera nas configurações do celular.'
+      );
+
+      return;
+    }
+
+    const resultado =
+      await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        quality: 0.9,
+      });
+
+    if (
+      resultado.canceled ||
+      resultado.assets.length === 0
+    ) {
+      return;
+    }
+
+    setCarregando(true);
+
+    const novoId =
+      `${Date.now()}-` +
+      Math.random().toString(36).slice(2, 10);
+
+    const pasta =
+      `${FileSystem.documentDirectory}` +
+      `fotos/${usuarioId}/`;
+
+    const informacoes =
+      await FileSystem.getInfoAsync(pasta);
+
+    if (!informacoes.exists) {
+      await FileSystem.makeDirectoryAsync(
+        pasta,
+        { intermediates: true }
+      );
+    }
+
+    const novaUriPermanente = `${pasta}${novoId}.jpg`;
+
+    // Copia o novo arquivo com um nome diferente do antigo,
+    // pra evitar que o <Image> reaproveite do cache pelo
+    // mesmo URI e continue mostrando a foto velha.
+    await FileSystem.copyAsync({
+      from: resultado.assets[0].uri,
+      to: novaUriPermanente,
+    });
+
+    let fotoAtualizada: Foto = {
+      ...foto,
+      uri: novaUriPermanente,
+      data: new Date().toISOString(),
+    };
+
+    // Atualiza a localização também, se possível.
+    // Se falhar, mantém as coordenadas antigas.
+    try {
+      const permissaoLocalizacao =
+        await Location.requestForegroundPermissionsAsync();
+
+      if (permissaoLocalizacao.granted) {
+        const posicao =
+          await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+
+        const latitude = posicao.coords.latitude;
+        const longitude = posicao.coords.longitude;
+
+        if (
+          Number.isFinite(latitude) &&
+          Number.isFinite(longitude)
+        ) {
+          fotoAtualizada = {
+            ...fotoAtualizada,
+            latitude,
+            longitude,
+            endereco: await obterEndereco(
+              latitude,
+              longitude
+            ),
+          };
+        }
+      }
+    } catch {
+      // A localização é opcional.
+    }
+
+    const novasFotos = fotos.map((item) =>
+      item.id === foto.id ? fotoAtualizada : item
+    );
+
+    await salvarHistorico(novasFotos);
+
+    // Apaga o arquivo antigo só depois de tudo
+    // ter sido salvo com sucesso.
+    await FileSystem.deleteAsync(
+      foto.uri,
+      { idempotent: true }
+    ).catch(() => {});
+
+    setFotoSelecionada(fotoAtualizada);
+
+    Alert.alert(
+      'Foto atualizada!',
+      'O registro foi atualizado com a nova foto.'
+    );
+  } catch {
+    Alert.alert(
+      'Erro',
+      'Não foi possível tirar a foto novamente.'
+    );
+  } finally {
+    setCarregando(false);
+  }
+}
   // ===================================================
   // INTERFACE PRINCIPAL
   // ===================================================
@@ -812,79 +964,6 @@ export default function CaptureScreen({
           )}
         </View>
 
-        {/* BARRA INFERIOR */}
-
-        <View style={styles.barraInferior}>
-          <TouchableOpacity
-            style={styles.itemNavegacao}
-            onPress={() =>
-              setAba('localizacao')
-            }
-          >
-            <Ionicons
-              name={
-                aba === 'localizacao'
-                  ? 'location'
-                  : 'location-outline'
-              }
-              size={28}
-              color={
-                aba === 'localizacao'
-                  ? '#00F0B5'
-                  : '#fff'
-              }
-            />
-
-            <Text style={styles.textoNavegacao}>
-              Localização
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.itemNavegacao}
-            onPress={abrirCamera}
-            disabled={
-              carregando ||
-              carregandoHistorico
-            }
-          >
-            <Ionicons
-              name="camera"
-              size={32}
-              color="#fff"
-            />
-
-            <Text style={styles.textoNavegacao}>
-              Registrar
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.itemNavegacao}
-            onPress={() =>
-              setAba('historico')
-            }
-          >
-            <Ionicons
-              name={
-                aba === 'historico'
-                  ? 'list-circle'
-                  : 'list'
-              }
-              size={30}
-              color={
-                aba === 'historico'
-                  ? '#00F0B5'
-                  : '#fff'
-              }
-            />
-
-            <Text style={styles.textoNavegacao}>
-              Histórico
-            </Text>
-          </TouchableOpacity>
-        </View>
-
         {/* PRÉVIA DA FOTO */}
 
         <Modal
@@ -1008,6 +1087,42 @@ export default function CaptureScreen({
                     fotoSelecionada
                   )}
                 </Text>
+                
+                <View style={styles.container}>
+                  <MapView 
+                    loadingEnabled={true}
+                    style={styles.map}
+                    initialRegion={{
+                      latitude: Number(fotoSelecionada.latitude),
+                      longitude: Number(fotoSelecionada.longitude),
+                      latitudeDelta: 0.005,
+                      longitudeDelta: 0.005,
+                    }}
+                  >
+                    <Marker
+                      coordinate={{ latitude: Number(fotoSelecionada.latitude), longitude: Number(fotoSelecionada.longitude) }}
+                      title="Meu ponto"
+                      description="Descrição opcional"
+                    />
+                  </MapView>
+                </View>
+                    
+                <TouchableOpacity
+                  style={styles.botaoNovaFoto}
+                  onPress={() => refazerFotoRegistro(fotoSelecionada)}
+                  disabled={carregando}
+                  >
+                  
+                  <Ionicons
+                    name="refresh"
+                    size={23}
+                    color="#fff"
+                  />
+
+                  <Text style={styles.textoBotao}>
+                    Tirar novamente
+                  </Text>
+                </TouchableOpacity>
 
                 {temLocalizacao(
                   fotoSelecionada
@@ -1060,13 +1175,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
+  map: {
+    flex: 1,
+    paddingTop: 100,
+    paddingBottom: 100,
+  },
+
   areaSegura: {
     flex: 1,
   },
 
   cabecalho: {
     paddingHorizontal: 24,
-    paddingTop: 28,
+    paddingTop: 50,
     paddingBottom: 24,
   },
 
@@ -1360,6 +1481,17 @@ const styles = StyleSheet.create({
     lineHeight: 25,
   },
 
+  botaoNovaFoto: {
+    backgroundColor: '#697386',
+    borderRadius: 14,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    marginTop: 25,
+  },
+
   botaoMapa: {
     backgroundColor: '#00A86B',
     borderRadius: 14,
@@ -1368,7 +1500,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 9,
-    marginTop: 25,
+    marginTop: 15,
   },
 
   botaoFechar: {
@@ -1377,5 +1509,6 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
     marginTop: 15,
+    marginBottom:40,
   },
 });
